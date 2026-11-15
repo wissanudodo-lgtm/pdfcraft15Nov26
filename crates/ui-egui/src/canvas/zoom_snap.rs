@@ -53,25 +53,22 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
             .fixed_pos(r.left_bottom() + egui::vec2(0.0, 6.0))
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            if ui.button(tl!("Print area…")).clicked() {
-                                view.area_choice = Some(AreaChoice::Print);
-                            }
-                            if ui.button(tl!("Save as image…")).clicked() {
-                                view.area_choice = Some(AreaChoice::Save);
-                            }
-                        });
+                    ui.horizontal(|ui| {
+                        if ui.button(tl!("Print area…")).clicked() {
+                            view.area_choice = Some(AreaChoice::Print);
+                        }
+                        if ui.button(tl!("Save as image…")).clicked() {
+                            view.area_choice = Some(AreaChoice::Save);
+                        }
                         // The picture's resolution; choosing one copies the area again.
-                        ui.horizontal(|ui| {
-                            ui.label(tl!("Resolution"));
-                            for ppi in SNAPSHOT_PPI_CHOICES {
-                                let label = if ppi == 0 { tl!("Auto").to_string() } else { format!("{ppi} ppi") };
-                                if ui.selectable_label(view.area_ppi == ppi, label).clicked() && view.area_ppi != ppi {
-                                    view.area_choice = Some(AreaChoice::Resolution(ppi));
-                                }
+                        ui.separator();
+                        ui.label(tl!("Resolution"));
+                        for ppi in SNAPSHOT_PPI_CHOICES {
+                            let label = if ppi == 0 { tl!("Auto").to_string() } else { format!("{ppi} ppi") };
+                            if ui.selectable_label(view.area_ppi == ppi, label).clicked() && view.area_ppi != ppi {
+                                view.area_choice = Some(AreaChoice::Resolution(ppi));
                             }
-                        });
+                        }
                     });
                 });
             });
