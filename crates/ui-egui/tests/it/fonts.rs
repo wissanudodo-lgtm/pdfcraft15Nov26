@@ -445,6 +445,29 @@ fn primary_ui_fonts_cover_latin_and_cyrillic_catalogs() {
     }
 }
 
+/// On a machine with an installed Thai font, the installed definitions include it and Thai has
+/// glyphs, so a Thai file name in a tab title is not boxes in a build without craft-fonts. Windows
+/// always ships Tahoma, and macOS Thonburi, so there the test never skips.
+#[test]
+fn system_fallback_covers_thai() {
+    const THAI: &str = "รายชื่อไฟล์ภาษาไทย";
+    let defs = theme::installed_font_definitions(theme::CjkPreference::Default);
+    let off = std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0");
+    if !defs.font_data.contains_key(theme::SYSTEM_THAI_FALLBACK) && (off || cfg!(all(unix, not(target_os = "macos")))) {
+        eprintln!("skipping system_fallback_covers_thai: no installed Thai fallback font (or PDFCRAFT_SYSTEM_FONTS=0)");
+        assert!(defs.families.values().all(|stack| !stack.iter().any(|n| n == theme::SYSTEM_THAI_FALLBACK)));
+        return;
+    }
+    for (family, stack) in &defs.families {
+        assert_eq!(stack.iter().filter(|n| *n == theme::SYSTEM_THAI_FALLBACK).count(), 1, "{family:?}: {stack:?}");
+    }
+    let mut fonts = Fonts::new(TextOptions::default(), defs);
+    for id in families() {
+        assert!(fonts.has_glyphs(&id, THAI), "{id:?} lacks {THAI}");
+    }
+    assert!(layout_widths(&mut fonts, THAI).iter().all(|w| w.is_finite() && *w > 0.0));
+}
+
 /// On a machine with an installed Korean font, the installed definitions include it and Hangul has
 /// glyphs, so a Korean file name in a tab title is not boxes. macOS always ships Apple SD Gothic
 /// Neo and Windows Malgun Gothic, so there the test never skips.

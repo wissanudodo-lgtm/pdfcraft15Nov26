@@ -4,8 +4,8 @@
 //! only draws characters none of them has, such as an Arabic file name in a build without
 //! craft-fonts, or the Simplified Chinese interface in a build without a `Hans` face (#826). A
 //! few more installed faces, [`devanagari_fallback`], [`telugu_fallback`], [`sinhala_fallback`],
-//! [`tamil_fallback`], [`hebrew_fallback`] and [`hangul_fallback`], draw Hindi, Telugu, Sinhala,
-//! Tamil, Hebrew and Korean when one is installed. It is read at runtime and never embedded or
+//! [`tamil_fallback`], [`hebrew_fallback`], [`hangul_fallback`] and [`thai_fallback`], draw Hindi,
+//! Telugu, Sinhala, Tamil, Hebrew, Korean and Thai when one is installed. It is read at runtime and never embedded or
 //! shipped (AGENTS.md §1.4), and `PDFCRAFT_SYSTEM_FONTS=0` turns it off (published screenshots do).
 
 use std::path::{Path, PathBuf};
@@ -34,6 +34,8 @@ const SINHALA_PROBE: char = '\u{0D9A}';
 const TAMIL_PROBE: char = '\u{0B95}';
 /// Hebrew letter alef: the face must have it to cover Hebrew.
 const HEBREW_PROBE: char = '\u{05D0}';
+/// Thai letter ko kai (ก): the face must have it to cover Thai.
+const THAI_PROBE: char = '\u{0E01}';
 /// Hangul syllable hih (힣, U+D7A3), the last of the 11,172 modern syllables: a face with it has
 /// the whole block. Droid Sans Fallback, for one, has 가 but few other syllables.
 const HANGUL_PROBE: char = '\u{D7A3}';
@@ -122,6 +124,14 @@ pub fn hangul_fallback() -> Option<Arc<FontData>> {
     CACHE.get_or_init(|| script_fallback(&hangul_candidates(), HANGUL_PROBE)).clone()
 }
 
+/// The installed fallback face for Thai, read once. `None` when it is turned off or no candidate
+/// is installed; the interface then draws what the embedded faces can (a build without
+/// craft-fonts has no Thai face, so a Thai file name in a tab title would be boxes).
+pub fn thai_fallback() -> Option<Arc<FontData>> {
+    static CACHE: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    CACHE.get_or_init(|| script_fallback(&thai_candidates(), THAI_PROBE)).clone()
+}
+
 fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>> {
     if std::env::var_os("PDFCRAFT_SYSTEM_FONTS").is_some_and(|v| v == "0") {
         return None;
@@ -138,7 +148,7 @@ fn script_fallback(candidates: &[PathBuf], probe: char) -> Option<Arc<FontData>>
 /// below. On that machine each family below lives in exactly one of the two folders, so their
 /// order is a deterministic choice rather than a tie-break that was ever exercised.
 ///
-/// Only [`macos_devanagari_candidates`] uses this today: in the Telugu, Sinhala and Tamil lists each
+/// Only [`macos_devanagari_candidates`] and the Thai list use this today: in the Telugu, Sinhala and Tamil lists each
 /// family is named once, in a single folder (some of those lists also name `/Library/Fonts` for the
 /// Unicode face). Their first choices all exist on macOS 26.6, so nothing is dropping there now — the
 /// same two-folder expansion would fit them, and is left for a change that tests it.
@@ -377,6 +387,32 @@ fn macos_han_candidates(traditional: bool) -> Vec<PathBuf> {
     list
 }
 
+/// Well-known locations of Thai faces, best first. Leelawadee UI is the Windows interface face for
+/// Thai (Windows 8 and later), Tahoma the older one every Windows has; Thonburi is Apple's.
+fn thai_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        ["LeelawUI.ttf", "leelawad.ttf", "tahoma.ttf", "cordia.ttf", "angsa.ttf"].iter().map(|f| windows_fonts().join(f)).collect()
+    } else if cfg!(target_os = "macos") {
+        let mut list = macos_candidates(&["Thonburi.ttc", "Ayuthaya.ttf"]);
+        list.push(PathBuf::from("/Library/Fonts/Arial Unicode.ttf"));
+        list
+    } else {
+        unix_fonts(&[
+            "google-noto/NotoSansThaiUI-Regular.ttf",
+            "google-noto/NotoSansThai-Regular.ttf",
+            "google-noto-vf/NotoSansThai[wght].ttf",
+            "truetype/noto/NotoSansThai-Regular.ttf",
+            "truetype/noto/NotoSansThaiUI-Regular.ttf",
+            "noto/NotoSansThai-Regular.ttf",
+            "noto/NotoSansThaiUI-Regular.ttf",
+            "truetype/tlwg/Garuda.ttf",
+            "truetype/tlwg/Loma.ttf",
+            "thai-scalable/Garuda.ttf",
+            "tlwg/Garuda.ttf",
+        ])
+    }
+}
+
 /// Well-known locations of Korean faces, best first.
 fn hangul_candidates() -> Vec<PathBuf> {
     if cfg!(windows) {
@@ -556,16 +592,32 @@ mod tests {
         assert!(script_fallback(&candidates, SINHALA_PROBE).is_none());
         assert!(script_fallback(&candidates, TAMIL_PROBE).is_none());
         assert!(script_fallback(&candidates, HEBREW_PROBE).is_none());
+        assert!(script_fallback(&candidates, THAI_PROBE).is_none());
     }
 
     #[test]
     fn script_candidates_are_absolute_font_files() {
-        for list in [devanagari_candidates(), telugu_candidates(), sinhala_candidates(), tamil_candidates(), hebrew_candidates(), hangul_candidates()]
-        {
+        for list in [
+            devanagari_candidates(),
+            telugu_candidates(),
+            sinhala_candidates(),
+            tamil_candidates(),
+            hebrew_candidates(),
+            hangul_candidates(),
+            thai_candidates(),
+        ] {
             assert!(!list.is_empty());
             assert!(list.iter().all(|p| p.is_absolute() || cfg!(windows)), "{list:?}");
             assert!(list.iter().all(|p| p.extension().is_some_and(|e| e == "ttf" || e == "ttc")), "{list:?}");
         }
+    }
+
+    /// Inter has no Thai, so a face is only taken for Thai when it maps the Thai probe.
+    #[test]
+    fn a_face_without_thai_is_not_a_thai_fallback() {
+        let inter = include_bytes!("../../../../assets/fonts/Inter-Regular.ttf");
+        assert_eq!(face_with(inter, THAI_PROBE), None);
+        assert_eq!(THAI_PROBE, 'ก', "Thai ko kai is the letter the Thai candidates are probed for");
     }
 
     #[test]
