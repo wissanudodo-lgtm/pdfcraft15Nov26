@@ -1076,6 +1076,38 @@ fn marquee_zoom_and_snapshot() {
     assert!(after > before * 2.0, "{before} → {after}");
 }
 
+/// A click with Snapshot, as in Foxit and PDF-XChange, copies the whole page; the menu under the
+/// copied area chooses the resolution and copies it again.
+#[test]
+fn a_snapshot_click_takes_the_page_and_the_menu_picks_its_resolution() {
+    let mut h = harness();
+    let i = h.state().active.unwrap();
+    let r = h.state().views[i].page_screen_rect(0).expect("on screen");
+    h.state_mut().system_clipboard = false;
+    assert!(h.state_mut().execute("edit.snapshot"));
+    // A press and release in one place, over the page.
+    let p = r.center();
+    h.hover_at(p);
+    h.run_steps(1);
+    h.drag_at(p);
+    h.run_steps(1);
+    h.drop_at(p);
+    h.run_steps(3);
+    let (page, area) = h.state().views[i].area_pick.expect("the page is kept as the copied area");
+    assert_eq!(page, 0);
+    // The fixture's pages are 200 × 300 pt.
+    assert_eq!(area, [0.0, 0.0, 200.0, 300.0]);
+    let (w, hgt, _) = h.state().last_snapshot.clone().expect("a snapshot");
+    assert!((833..=835).contains(&w) && (1250..=1252).contains(&hgt), "200 × 300 pt at 300 ppi: {w} × {hgt}");
+    // 150 ppi copies the same page again at half the pixels.
+    h.get_by_label("150 ppi").click();
+    h.run_steps(3);
+    assert_eq!(h.state().snapshot_ppi, 150);
+    let (w, hgt, _) = h.state().last_snapshot.clone().expect("a snapshot");
+    assert!((416..=418).contains(&w) && (625..=627).contains(&hgt), "200 × 300 pt at 150 ppi: {w} × {hgt}");
+    assert_eq!(h.state().views[i].area_pick, Some((0, [0.0, 0.0, 200.0, 300.0])), "the same area stays");
+}
+
 /// Print a selected area: the area Snapshot copied stays outlined with a small menu under it;
 /// Print area… opens Print on just that area (Fit to paper), and Save as image… writes a PNG.
 #[test]
