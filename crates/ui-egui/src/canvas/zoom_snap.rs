@@ -38,6 +38,9 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
         view.marquee = Some((page, o));
         view.area_pick = None;
     }
+    // Where the menu under a copied area is this frame: a click on it is the menu's, not a click
+    // on the page (which copies the whole page).
+    let mut menu_rect: Option<Rect> = None;
     // The area just copied stays outlined, with what can be done with it underneath.
     if let Some((p, area)) = view.area_pick
         && p == page
@@ -45,7 +48,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
     {
         let r = xf.view_rect(area);
         ui.painter().rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, Color32::from_rgb(0x14, 0x73, 0xE6)), egui::StrokeKind::Middle);
-        egui::Area::new(egui::Id::unique("snapshot-area-menu"))
+        let menu = egui::Area::new(egui::Id::unique("snapshot-area-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(r.left_bottom() + egui::vec2(0.0, 6.0))
             .show(ui.ctx(), |ui| {
@@ -72,6 +75,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
                     });
                 });
             });
+        menu_rect = Some(menu.response.rect);
     }
     if let Some((p, start)) = view.marquee
         && p == page
@@ -89,7 +93,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
     }
     if free
         && resp.clicked()
-        && let Some(p) = pointer.filter(|p| xf.rect.contains(*p))
+        && let Some(p) = pointer.filter(|p| xf.rect.contains(*p) && !menu_rect.is_some_and(|m| m.contains(*p)))
     {
         let v = xf.screen_to_view(p);
         view.marquee_done = Some((page, Rect::from_min_size(p, egui::Vec2::ZERO), [v.0, v.1, v.0, v.1]));

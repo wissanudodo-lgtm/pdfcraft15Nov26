@@ -1097,8 +1097,9 @@ fn a_snapshot_click_takes_the_page_and_the_menu_picks_its_resolution() {
     assert_eq!(page, 0);
     // The fixture's pages are 200 × 300 pt.
     assert_eq!(area, [0.0, 0.0, 200.0, 300.0]);
+    // Automatic is 300 ppi, or the zoom when that is finer: never fewer pixels than 300 ppi.
     let (w, hgt, _) = h.state().last_snapshot.clone().expect("a snapshot");
-    assert!((833..=835).contains(&w) && (1250..=1252).contains(&hgt), "200 × 300 pt at 300 ppi: {w} × {hgt}");
+    assert!(w >= 833 && hgt >= 1250, "200 × 300 pt, at least 300 ppi: {w} × {hgt}");
     // 150 ppi copies the same page again at half the pixels.
     h.get_by_label("150 ppi").click();
     h.run_steps(3);
