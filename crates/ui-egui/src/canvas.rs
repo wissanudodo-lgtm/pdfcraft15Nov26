@@ -746,6 +746,8 @@ pub struct DocView {
     /// (Print area…, Save as image…), and what was chosen there.
     pub area_pick: Option<(usize, [f32; 4])>,
     pub area_choice: Option<crate::zoom_snap::AreaChoice>,
+    /// The resolution (`snapshot_ppi`) the area in `area_pick` was copied at, for the menu under it.
+    pub area_ppi: u32,
     /// Fill & Sign text being typed.
     pub fill_text: Option<crate::fill_sign::TypeBox>,
     /// A queued Fill & Sign signature: select it after its edit succeeds, then leave placement.
@@ -1171,6 +1173,7 @@ impl DocView {
             marquee_done: None,
             area_pick: None,
             area_choice: None,
+            area_ppi: 0,
             fill_text: None,
             fill_signature_page: None,
             lock_offer_dismissed: false,
@@ -2938,6 +2941,7 @@ fn finish_sign_requests(app: &mut PdfCraftApp, index: usize, mut tool: QuickTool
         match choice {
             crate::zoom_snap::AreaChoice::Print => app.open_print_area(page, area),
             crate::zoom_snap::AreaChoice::Save => app.save_snapshot_image(index, page, area),
+            crate::zoom_snap::AreaChoice::Resolution(ppi) => app.retake_snapshot(index, page, area, ppi),
         }
     }
     // A signature rectangle was drawn, or an empty signature field clicked.

@@ -20,6 +20,8 @@ pub enum AreaChoice {
     Print,
     /// Save the copied picture as a PNG file.
     Save,
+    /// Copy the same area again at this many pixels per inch (0 is automatic).
+    Resolution(u32),
 }
 
 /// Drag a rectangle on page `page` (Marquee Zoom, Snapshot), with a press nobody holds (`free`).
@@ -36,6 +38,9 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
         view.marquee = Some((page, o));
         view.area_pick = None;
     }
+    // Where the menu under a copied area is this frame: a click on it is the menu's, not a click
+    // on the page (which copies the whole page).
+    let mut menu_rect: Option<Rect> = None;
     // The area just copied stays outlined, with what can be done with it underneath.
     if let Some((p, area)) = view.area_pick
         && p == page
@@ -43,7 +48,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
     {
         let r = xf.view_rect(area);
         ui.painter().rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, Color32::from_rgb(0x14, 0x73, 0xE6)), egui::StrokeKind::Middle);
-        egui::Area::new(egui::Id::unique("snapshot-area-menu"))
+        let menu = egui::Area::new(egui::Id::unique("snapshot-area-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(r.left_bottom() + egui::vec2(0.0, 6.0))
             .show(ui.ctx(), |ui| {
@@ -55,9 +60,19 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
                         if ui.button(tl!("Save as image…")).clicked() {
                             view.area_choice = Some(AreaChoice::Save);
                         }
+                        // The picture's resolution; choosing one copies the area again.
+                        ui.separator();
+                        ui.label(tl!("Resolution"));
+                        for ppi in SNAPSHOT_PPI_CHOICES {
+                            let label = if ppi == 0 { tl!("Auto").to_string() } else { format!("{ppi} ppi") };
+                            if ui.selectable_label(view.area_ppi == ppi, label).clicked() && view.area_ppi != ppi {
+                                view.area_choice = Some(AreaChoice::Resolution(ppi));
+                            }
+                        }
                     });
                 });
             });
+        menu_rect = Some(menu.response.rect);
     }
     if let Some((p, start)) = view.marquee
         && p == page
@@ -75,7 +90,7 @@ pub(crate) fn page_input(ui: &egui::Ui, resp: &egui::Response, xf: &PageXform, p
     }
     if free
         && resp.clicked()
-        && let Some(p) = pointer.filter(|p| xf.rect.contains(*p))
+        && let Some(p) = pointer.filter(|p| xf.rect.contains(*p) && !menu_rect.is_some_and(|m| m.contains(*p)))
     {
         let v = xf.screen_to_view(p);
         view.marquee_done = Some((page, Rect::from_min_size(p, egui::Vec2::ZERO), [v.0, v.1, v.0, v.1]));
@@ -98,23 +113,52 @@ impl PdfCraftApp {
                 }
             }
             QuickTool::Snapshot => {
+                // A click, not a drag, takes the whole page.
+                let view_rect = if rect.width() < 6.0 && rect.height() < 6.0 {
+                    let Some(whole) = self.page_view_rect(index, page) else { return };
+                    whole
+                } else {
+                    view_rect
+                };
                 if view_rect[2] - view_rect[0] < 2.0 || view_rect[3] - view_rect[1] < 2.0 {
                     return;
                 }
-                // The tool outlives the tab it was chosen on.
-                if self.views.get(index).map(|v| v.id).is_some_and(|id| !self.may_copy(id)) {
-                    return;
-                }
-                match self.snapshot(index, page, view_rect) {
-                    Ok((w, h)) => {
-                        self.views[index].area_pick = Some((page, view_rect));
-                        self.notify_fmt("The selected area has been copied ({w} × {h} pixels)", &[("w", &w.to_string()), ("h", &h.to_string())])
-                    }
-                    Err(e) => self.notify_fmt("Couldn't take the snapshot: {e}", &[("e", &e.to_string())]),
-                }
+                self.copy_area(index, page, view_rect);
             }
             _ => {}
         }
+    }
+
+    /// The whole of `page` in view `index` as a rectangle in page view points: [x0, y0, x1, y1].
+    fn page_view_rect(&self, index: usize, page: usize) -> Option<[f32; 4]> {
+        let id = self.views.get(index)?.id;
+        let p = self.session.get(id)?.info.pages.get(page)?;
+        Some([0.0, 0.0, p.width, p.height])
+    }
+
+    /// Copy `view_rect` of `page` as an image and keep it outlined with its menu.
+    fn copy_area(&mut self, index: usize, page: usize, view_rect: [f32; 4]) {
+        // The tool outlives the tab it was chosen on.
+        if self.views.get(index).map(|v| v.id).is_some_and(|id| !self.may_copy(id)) {
+            return;
+        }
+        match self.snapshot(index, page, view_rect) {
+            Ok((w, h)) => {
+                let ppi = self.snapshot_ppi;
+                let view = &mut self.views[index];
+                view.area_pick = Some((page, view_rect));
+                view.area_ppi = ppi;
+                self.notify_fmt("The selected area has been copied ({w} × {h} pixels)", &[("w", &w.to_string()), ("h", &h.to_string())])
+            }
+            Err(e) => self.notify_fmt("Couldn't take the snapshot: {e}", &[("e", &e.to_string())]),
+        }
+    }
+
+    /// The menu under a copied area chose a resolution: it is the one to draw at from now on, and
+    /// the area is copied again at it.
+    pub(crate) fn retake_snapshot(&mut self, index: usize, page: usize, view_rect: [f32; 4], ppi: u32) {
+        self.snapshot_ppi = ppi;
+        self.copy_area(index, page, view_rect);
     }
 
     /// View ▸ Zoom ▸ Fit Visible on the current page: find where the page has ink (a quick
@@ -233,7 +277,7 @@ impl PdfCraftApp {
         let view = self.views.get(index).ok_or("no document")?;
         let doc = self.session.get(view.id).ok_or("no document")?;
         let ppp = self.ctx.as_ref().map_or(2.0, |c| c.pixels_per_point());
-        let scale = snapshot_scale(view.render_scale(ppp), view_rect[2] - view_rect[0], view_rect[3] - view_rect[1]);
+        let scale = snapshot_scale_at(self.snapshot_ppi, view.render_scale(ppp), view_rect[2] - view_rect[0], view_rect[3] - view_rect[1]);
         let tile = Tile {
             x: (view_rect[0] * scale).floor().max(0.0) as u32,
             y: (view_rect[1] * scale).floor().max(0.0) as u32,
@@ -267,6 +311,19 @@ fn snapshot_scale(on_screen: f32, width: f32, height: f32) -> f32 {
     on_screen.max(SNAPSHOT_MIN_SCALE).min(SNAPSHOT_MAX_SIDE / width.max(height).max(1.0)).max(0.01)
 }
 
+/// The resolutions the menu under a copied area offers, in pixels per inch; 0 is automatic.
+const SNAPSHOT_PPI_CHOICES: [u32; 4] = [0, 150, 300, 600];
+
+/// The pixels per point to draw at when `ppi` pixels per inch were chosen (0 is automatic, see
+/// [`snapshot_scale`]); an area too large for one tile at that resolution comes out as fine as a
+/// tile allows.
+fn snapshot_scale_at(ppi: u32, on_screen: f32, width: f32, height: f32) -> f32 {
+    if ppi == 0 {
+        return snapshot_scale(on_screen, width, height);
+    }
+    (ppi as f32 / 72.0).min(SNAPSHOT_MAX_SIDE / width.max(height).max(1.0)).max(0.01)
+}
+
 /// The normalised bounds [u0, v0, u1, v1] of the pixels that aren't (near) white, if any.
 pub(crate) fn ink_bounds(w: usize, h: usize, rgba: &[u8]) -> Option<[f32; 4]> {
     if w == 0 || h == 0 || rgba.len() < w * h * 4 {
@@ -289,7 +346,18 @@ pub(crate) fn ink_bounds(w: usize, h: usize, rgba: &[u8]) -> Option<[f32; 4]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SNAPSHOT_MAX_SIDE, SNAPSHOT_MIN_SCALE, snapshot_scale};
+    use super::{SNAPSHOT_MAX_SIDE, SNAPSHOT_MIN_SCALE, snapshot_scale, snapshot_scale_at};
+
+    #[test]
+    fn a_chosen_resolution_replaces_the_zoom_and_the_minimum() {
+        assert_eq!(snapshot_scale_at(0, 0.5, 100.0, 100.0), snapshot_scale(0.5, 100.0, 100.0), "automatic");
+        assert_eq!(snapshot_scale_at(144, 8.0, 100.0, 100.0), 2.0, "coarser than the zoom");
+        assert_eq!(snapshot_scale_at(72, 0.25, 100.0, 100.0), 1.0, "coarser than the minimum");
+        // 600 ppi of 2000 pt would be 16 667 pixels: as fine as one tile holds instead.
+        let scale = snapshot_scale_at(600, 1.0, 2000.0, 100.0);
+        assert!((2000.0 * scale).ceil() <= SNAPSHOT_MAX_SIDE + 1.0, "{scale}");
+        assert!(snapshot_scale_at(300, f32::NAN, f32::NAN, f32::INFINITY) > 0.0);
+    }
 
     #[test]
     fn a_snapshot_is_drawn_at_the_finer_of_the_zoom_and_the_minimum() {
